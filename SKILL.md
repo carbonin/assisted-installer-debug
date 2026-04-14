@@ -31,14 +31,24 @@ This skill helps debug:
 
 ### 1. Extract and Locate Must-Gather
 
-First, extract the relevant assisted installer data from the ACM must-gather archive:
+**IMPORTANT**: If you are given a compressed archive file (`.tar.gz`, `.tgz`, `.tar`), you must first extract it before running the extraction script:
+
+```bash
+# If given a compressed archive, extract it first
+tar -xzf /path/to/multicluster-engine-must-gather.tar.gz
+
+# This will create a directory (usually named multicluster-engine-must-gather/)
+# Use that directory path (not the .tar.gz file) with the extraction script
+```
+
+Then extract the relevant assisted installer data from the ACM must-gather directory:
 
 ```bash
 # Use the extraction script to pull out relevant resources
-./extract-assisted-data.sh <path-to-must-gather> <output-dir>
+./extract-assisted-data.sh <path-to-must-gather-directory> <output-dir>
 
 # Example:
-./extract-assisted-data.sh ~/Downloads/acm-must-gather ./path-to-data
+./extract-assisted-data.sh ~/Downloads/multicluster-engine-must-gather ./path-to-data
 ```
 
 This script will:
@@ -48,6 +58,18 @@ This script will:
 - Extract metal3.io resources (BareMetalHosts, PreprovisioningImages)
 - Copy assisted-service pod logs from multicluster-engine namespace
 - Copy metal3 pod logs from openshift-machine-api namespace
+
+**VALIDATION**: After extraction, if you find no AgentClusterInstall, Agent, or other assisted installer resources, the must-gather was likely **NOT** collected with the correct must-gather plugins. This can happen if:
+- The must-gather was collected from a cluster without ACM/MCE installed
+- The must-gather was collected without the multicluster-engine plugin
+- The archive is from a different type of must-gather (e.g., standard OpenShift must-gather)
+
+**ACTION**: If no assisted installer resources are found, **STOP** and ask the user to verify:
+1. Is this the correct must-gather archive for debugging assisted installer issues?
+2. Was the must-gather collected from the ACM hub cluster (not the spoke/managed cluster)?
+3. Does the must-gather contain `multicluster-engine` namespace data?
+
+Do not continue trying to find useful information if no assisted installer resources exist - this wastes time and may lead to incorrect conclusions.
 
 See the "Common Log Locations" section below for the complete extracted directory structure.
 
