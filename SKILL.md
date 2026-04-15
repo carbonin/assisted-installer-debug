@@ -60,6 +60,11 @@ OUTPUT_DIR="workdir/customer-case-12345-$(date +%Y%m%d-%H%M%S)"
 ./extract-assisted-data.sh ~/Downloads/multicluster-engine-must-gather "$OUTPUT_DIR"
 ```
 
+**IMPORTANT - File Organization**:
+- **ALL debugging output files** (analysis notes, findings, summaries, etc.) should be saved **inside the same `$OUTPUT_DIR`** directory
+- The `workdir/` directory is in `.gitignore` - **never commit must-gather data or debugging notes** to git
+- This keeps all investigation artifacts together and prevents accidental commits of customer data
+
 This script will:
 - Extract agent-install.openshift.io resources (Agents, InfraEnvs, NMStateConfigs)
 - Extract extensions.hive.openshift.io resources (AgentClusterInstalls)
