@@ -43,12 +43,21 @@ tar -xzf /path/to/multicluster-engine-must-gather.tar.gz
 
 Then extract the relevant assisted installer data from the ACM must-gather directory:
 
+**IMPORTANT**: Create the output directory in the local `workdir/` with a semi-random name to avoid collisions:
+
 ```bash
 # Use the extraction script to pull out relevant resources
-./extract-assisted-data.sh <path-to-must-gather-directory> <output-dir>
+# Create output dir in workdir/ with timestamp to avoid collisions
+OUTPUT_DIR="workdir/extracted-$(date +%Y%m%d-%H%M%S)"
+./extract-assisted-data.sh <path-to-must-gather-directory> "$OUTPUT_DIR"
 
 # Example:
-./extract-assisted-data.sh ~/Downloads/multicluster-engine-must-gather ./path-to-data
+OUTPUT_DIR="workdir/extracted-$(date +%Y%m%d-%H%M%S)"
+./extract-assisted-data.sh ~/Downloads/multicluster-engine-must-gather "$OUTPUT_DIR"
+
+# Or use a descriptive name with timestamp:
+OUTPUT_DIR="workdir/customer-case-12345-$(date +%Y%m%d-%H%M%S)"
+./extract-assisted-data.sh ~/Downloads/multicluster-engine-must-gather "$OUTPUT_DIR"
 ```
 
 This script will:
@@ -73,36 +82,40 @@ Do not continue trying to find useful information if no assisted installer resou
 
 See the "Common Log Locations" section below for the complete extracted directory structure.
 
-### 2. Identify the Problem Scope
+### 2. Get Overview of All Clusters and Agents
 
-After extracting the data, check all AgentClusterInstall resources for failures:
+After extracting the data, use the status scripts to get a quick overview:
 
 ```bash
-# Quick manual check
-./check-aci-status.sh ./path-to-data
+# Check all clusters (use the same OUTPUT_DIR from extraction step)
+./check-aci-status.sh "$OUTPUT_DIR"
 
-# Or check manually
-for aci in ./path-to-data/crs/*/extensions.hive.openshift.io/agentclusterinstalls/*.yaml; do
-  echo "=== $(basename $(dirname $(dirname $(dirname $aci))))"
-  yq eval '.status.conditions[] | select(.type == "Completed")' "$aci"
-  yq eval '.status.debugInfo.stateInfo' "$aci"
-  echo ""
-done
+# Check all agents
+./check-agent-status.sh "$OUTPUT_DIR"
+
+# If you didn't save OUTPUT_DIR, it will be in workdir/extracted-<timestamp>
+# List available extractions: ls -dt workdir/extracted-* | head -5
 ```
 
-**Key things to check in AgentClusterInstall:**
-- `.status.conditions[] | select(.type == "Completed")` - Look for `status: "False"` (failed) or warnings in message
-- `.status.debugInfo.state` - Current state (error, adding-hosts, etc.)
-- `.status.debugInfo.stateInfo` - Human-readable status message
+These scripts will show:
+- **Clusters**: Name, namespace, version, status, state, and debug info for failed/problematic clusters
+- **Agents**: Agent ID, cluster, role, stage, progress percentage, and debug info for failed/stuck agents
+
+Each resource includes the file path for detailed inspection.
+
+**Key things to look for:**
+- **Failed clusters**: Status=FAILED, look at the failure reason and message
+- **Stuck agents**: Stage not "Done" or percentage < 100%, especially hosts stuck at "Rebooting"
+- **Error states**: State contains "error" or "pending-user-action"
 
 **Common failure patterns:**
 - "timed out while pending user action" - Hosts not booting from ISO
 - "some workers did not join" - Worker node issues after control plane success
-- Validation errors - Host requirements not met
+- "Host failed to install because its installation stage Joined took longer than expected" - Timeout after rebooting
 
 ### 3. Investigate Failed Cluster Details
 
-Once you've identified a failed cluster, dig deeper into the agent status:
+Once you've identified failed clusters and stuck agents from the overview, dig deeper:
 
 ```bash
 # Set the namespace of the failed cluster
@@ -256,6 +269,9 @@ grep -r "timeout" --include="*.go" internal/cluster/common.go internal/host/comm
 ## Common Log Locations
 
 ### Extracted Directory Structure
+
+**Note**: `<output-dir>` refers to the extraction directory created in `workdir/` (e.g., `workdir/extracted-20260415-143022/`)
+
 ```
 <output-dir>/
 ├── crs/

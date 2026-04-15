@@ -21,69 +21,66 @@ if [ ! -d "$DATA_DIR" ]; then
     exit 1
 fi
 
-echo "Checking AgentClusterInstall status..."
-echo ""
-
 # Find all agentclusterinstall files
-aci_files=$(find "$DATA_DIR/crs" -type f -path "*/agentclusterinstalls/*.yaml" | sort)
+aci_files=$(find "$DATA_DIR/crs" -type f -path "*/extensions.hive.openshift.io/agentclusterinstalls/*.yaml" 2>/dev/null | sort || true)
 
 if [ -z "$aci_files" ]; then
     echo "No AgentClusterInstall resources found"
     exit 0
 fi
 
-failed_count=0
-warning_count=0
-success_count=0
-
 # Process each ACI
 while IFS= read -r aci; do
-    namespace=$(basename $(dirname $(dirname $(dirname "$aci"))))
-    cluster_name=$(basename "$aci" .yaml)
+    if [ ! -f "$aci" ]; then
+        continue
+    fi
 
-    # Get Completed condition
-    completed_status=$(yq eval '.status.conditions[] | select(.type == "Completed") | .status' "$aci" 2>/dev/null || echo "Unknown")
-    completed_reason=$(yq eval '.status.conditions[] | select(.type == "Completed") | .reason' "$aci" 2>/dev/null || echo "Unknown")
-    completed_message=$(yq eval '.status.conditions[] | select(.type == "Completed") | .message' "$aci" 2>/dev/null || echo "Unknown")
-    state=$(yq eval '.status.debugInfo.state' "$aci" 2>/dev/null || echo "unknown")
-    state_info=$(yq eval '.status.debugInfo.stateInfo' "$aci" 2>/dev/null || echo "unknown")
+    # Extract basic information
+    cluster_name=$(yq eval '.spec.clusterDeploymentRef.name // .metadata.name' < "$aci")
+    namespace=$(yq eval '.metadata.namespace' < "$aci")
+    version=$(yq eval '.spec.imageSetRef.name // "unknown"' < "$aci")
+
+    # Get status conditions
+    failed_status=$(yq eval '.status.conditions[] | select(.type == "Failed") | .status' < "$aci" 2>/dev/null || echo "")
+    failed_reason=$(yq eval '.status.conditions[] | select(.type == "Failed") | .reason' < "$aci" 2>/dev/null || echo "")
+    failed_message=$(yq eval '.status.conditions[] | select(.type == "Failed") | .message' < "$aci" 2>/dev/null || echo "")
+
+    completed_status=$(yq eval '.status.conditions[] | select(.type == "Completed") | .status' < "$aci" 2>/dev/null || echo "")
+    completed_message=$(yq eval '.status.conditions[] | select(.type == "Completed") | .message' < "$aci" 2>/dev/null || echo "")
+
+    state=$(yq eval '.status.debugInfo.state // "unknown"' < "$aci")
+    state_info=$(yq eval '.status.debugInfo.stateInfo // ""' < "$aci")
 
     # Determine overall status
-    if [ "$completed_status" = "False" ]; then
-        status_icon="❌ FAILED"
-        ((failed_count++))
+    if [ "$failed_status" = "True" ]; then
+        status="FAILED"
     elif [ "$completed_status" = "True" ] && echo "$completed_message" | grep -qi "but some workers"; then
-        status_icon="⚠️  WARNING"
-        ((warning_count++))
+        status="WARNING"
     elif [ "$completed_status" = "True" ]; then
-        status_icon="✅ SUCCESS"
-        ((success_count++))
+        status="SUCCESS"
     else
-        status_icon="❓ UNKNOWN"
+        status="IN_PROGRESS"
     fi
 
     echo "Cluster: $namespace/$cluster_name"
-    echo "  Status: $status_icon"
+    echo "  File: $aci"
+    echo "  Version: $version"
+    echo "  Status: $status"
     echo "  State: $state"
-    echo "  Message: $state_info"
+    if [ -n "$state_info" ] && [ "$state_info" != "null" ]; then
+        echo "  State Info: $state_info"
+    fi
+
+    # For failed or problematic clusters, show additional details
+    if [ "$failed_status" = "True" ] || [[ "$state" == *"error"* ]] || [[ "$state" == *"pending-user-action"* ]]; then
+        if [ -n "$failed_reason" ] && [ "$failed_reason" != "null" ]; then
+            echo "  Failed Reason: $failed_reason"
+        fi
+        if [ -n "$failed_message" ] && [ "$failed_message" != "null" ]; then
+            echo "  Failed Message: $failed_message"
+        fi
+        echo "  Conditions:"
+        yq eval '.status.conditions[] | "    " + .type + ": " + .status + " (" + .reason + ")"' < "$aci" 2>/dev/null | grep -v "null" || echo "    none"
+    fi
     echo ""
 done <<< "$aci_files"
-
-echo "Summary:"
-echo "  Total clusters: $((failed_count + warning_count + success_count))"
-echo "  ❌ Failed: $failed_count"
-echo "  ⚠️  Warnings: $warning_count"
-echo "  ✅ Success: $success_count"
-echo ""
-
-if [ $failed_count -gt 0 ]; then
-    echo "Failed clusters require investigation. Focus on:"
-    while IFS= read -r aci; do
-        completed_status=$(yq eval '.status.conditions[] | select(.type == "Completed") | .status' "$aci" 2>/dev/null || echo "Unknown")
-        if [ "$completed_status" = "False" ]; then
-            namespace=$(basename $(dirname $(dirname $(dirname "$aci"))))
-            cluster_name=$(basename "$aci" .yaml)
-            echo "  - $namespace/$cluster_name"
-        fi
-    done <<< "$aci_files"
-fi
